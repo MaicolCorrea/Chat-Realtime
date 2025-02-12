@@ -19,6 +19,8 @@ const io = new Server(server, {
     connectionStateRecovery: {}
 })
 
+const connectedUsers = new Set()
+
 // Servir archivos estáticos
 app.use(express.static(join(__dirname, '../client')))
 app.use(logger('dev'))
@@ -35,7 +37,8 @@ async function initDB() {
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 content TEXT,
-                username TEXT
+                username TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         `)
         console.log('Database initialized')
@@ -46,36 +49,61 @@ async function initDB() {
 
 // Configuración de Socket.IO
 io.on('connection', async (socket) => {
+    const username = socket.handshake.auth.username
+    connectedUsers.add(username)
+    io.emit('user list', Array.from(connectedUsers))
+
     console.log('a user has connected!');
 
     socket.on('disconnect', () => {
+        connectedUsers.delete(username)
+        io.emit('user list', Array.from(connectedUsers))
         console.log('an user has disconnected');
     });
 
     socket.on('chat message', async (msg) => {
-        let result
-        let username = socket.handshake.auth.username ?? 'anonymous'
         try {
-            result = await db.execute({
+            const result = await db.execute({
                 sql: 'INSERT INTO messages (content, username) VALUES (:msg, :username)',
                 args: { msg, username }
             });
+            // Convertir BigInt a String antes de enviarlo
+            const messageId = result.lastInsertRowid.toString()
+            io.emit('chat message', msg, messageId, username, messageId)
         } catch (e) {
             console.error(e)
-            return
         }
-        io.emit('chat message', msg, result.lastInsertRowid.toString(), username)
     });
+
+    socket.on('delete message', async (messageId) => {
+        try {
+            const message = await db.execute({
+                sql: 'SELECT username FROM messages WHERE id = ?',
+                args: [messageId]
+            })
+
+            if (message.rows[0]?.username === username) {
+                await db.execute({
+                    sql: 'DELETE FROM messages WHERE id = ?',
+                    args: [messageId]
+                })
+                io.emit('message deleted', messageId)
+            }
+        } catch (e) {
+            console.error(e)
+        }
+    })
 
     if (!socket.recovered) {
         try {
             const results = await db.execute({
-                sql: 'SELECT id, content, username FROM messages WHERE id > ?',
-                args: [socket.handshake.auth.serverOffset ?? 0]
+                sql: 'SELECT id, content, username, created_at FROM messages ORDER BY created_at DESC LIMIT 50',
+                args: []
             });
 
-            results.rows.forEach(row => {
-                socket.emit('chat message', row.content, row.id.toString(), row.username);
+            // Invertir el orden para mostrar los más antiguos primero
+            results.rows.reverse().forEach(row => {
+                socket.emit('chat message', row.content, row.id.toString(), row.username, row.id.toString());
             });
         } catch (e) {
             console.error(e)

@@ -2,9 +2,12 @@ import express from 'express'
 import logger from 'morgan'
 import dotenv from 'dotenv'
 import { createClient } from '@libsql/client'
-
 import { Server } from 'socket.io'
 import { createServer } from 'node:http'
+import { fileURLToPath } from 'url'
+import { dirname, join } from 'path'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
 
 dotenv.config()
 
@@ -14,21 +17,34 @@ const app = express()
 const server = createServer(app)
 const io = new Server(server, {
     connectionStateRecovery: {}
-});
+})
+
+// Servir archivos estáticos
+app.use(express.static(join(__dirname, '../client')))
+app.use(logger('dev'))
 
 const db = createClient({
     url: 'libsql://grateful-timeslip-analistaist1.turso.io',
     authToken: process.env.DB_TOKEN
-}); 
+})
 
-await db.execute(`
-    CREATE TABLE IF NOT EXISTS messages (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        content TEXT,
-        username TEXT
-    )
-`);
+// Inicialización de la base de datos
+async function initDB() {
+    try {
+        await db.execute(`
+            CREATE TABLE IF NOT EXISTS messages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                content TEXT,
+                username TEXT
+            )
+        `)
+        console.log('Database initialized')
+    } catch (e) {
+        console.error('Error initializing database:', e)
+    }
+}
 
+// Configuración de Socket.IO
 io.on('connection', async (socket) => {
     console.log('a user has connected!');
 
@@ -65,14 +81,14 @@ io.on('connection', async (socket) => {
             console.error(e)
         }
     }
-});
-
-app.use(logger('dev'));
+})
 
 app.get('/', (req, res) => {
-    res.sendFile(process.cwd() + '/client/index.html');
-});
+    res.sendFile(join(__dirname, '../client/index.html'))
+})
 
+// Iniciar servidor
+await initDB()
 server.listen(port, () => {
-    console.log(`Server running on port ${port}`);
-});
+    console.log(`Server running on port ${port}`)
+})

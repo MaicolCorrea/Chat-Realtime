@@ -46,38 +46,123 @@
         // Función para convertir emojis en el texto
         function convertEmojis(text) {
             const emojiMap = {
-                ':)': '😊', ':D': '😃', ':(': '😢', ':P': '😛',
-                '<3': '❤️', ':*': '😘', ':O': '😮', ':|': '😐',
-                ';)': '😉', ':angry:': '😠', ':love:': '😍',
-                ':laugh:': '🤣', ':thumbsup:': '👍', ':clap:': '👏'
+                ':)': '😊',
+                ':D': '😃',
+                ':(': '😢',
+                ':P': '😛',
+                '<3': '❤️',
+                ':*': '😘',
+                ':O': '😮',
+                ':|': '😐',
+                ';)': '😉',
+                ':angry:': '😠',
+                ':love:': '😍',
+                ':laugh:': '🤣',
+                ':thumbsup:': '👍',
+                ':clap:': '👏'
             }
             
             return text.replace(/:[)\dDPO|]|<3|:\*|;[)]|:angry:|:love:|:laugh:|:thumbsup:|:clap:/g, 
                 match => emojiMap[match] || match)
         }
 
-        socket.on('chat message', (msg, serverOffset, msgUsername, messageId) => {
+        let typingTimeout;
+        const typingUsers = new Set();
+
+        input.addEventListener('input', () => {
+            clearTimeout(typingTimeout);
+            socket.emit('typing', true);
+            
+            typingTimeout = setTimeout(() => {
+                socket.emit('typing', false);
+            }, 1000);
+        });
+
+        socket.on('user typing', ({ username, isTyping }) => {
+            if (isTyping) {
+                typingUsers.add(username);
+            } else {
+                typingUsers.delete(username);
+            }
+            updateTypingIndicator();
+        });
+
+        function updateTypingIndicator() {
+            const typingIndicator = document.getElementById('typing-indicator');
+            if (typingUsers.size > 0) {
+                const users = Array.from(typingUsers).join(', ');
+                typingIndicator.textContent = `${users} ${typingUsers.size > 1 ? 'están' : 'está'} escribiendo...`;
+                typingIndicator.style.display = 'block';
+            } else {
+                typingIndicator.style.display = 'none';
+            }
+        }
+
+        // Funcionalidad de cambio de nombre
+        document.getElementById('change-username').addEventListener('click', () => {
+            const newUsername = prompt('Ingresa tu nuevo nombre de usuario:');
+            if (newUsername && newUsername.trim()) {
+                socket.emit('change username', newUsername.trim());
+                localStorage.setItem('username', newUsername.trim());
+                document.getElementById('current-user').textContent = newUsername.trim();
+            }
+        });
+
+        // Reacciones y respuestas
+        function addReaction(messageId, reaction) {
+            socket.emit('add reaction', { messageId, reaction });
+        }
+
+        function replyToMessage(messageId, content) {
+            socket.emit('reply message', { replyToId: messageId, content });
+        }
+
+        socket.on('reaction added', ({ messageId, username, reaction }) => {
+            const message = document.querySelector(`[data-message-id="${messageId}"]`);
+            if (message) {
+                const reactionsContainer = message.querySelector('.reactions') || 
+                    message.appendChild(document.createElement('div'));
+                reactionsContainer.className = 'reactions';
+                const reactionEl = document.createElement('span');
+                reactionEl.className = 'reaction';
+                reactionEl.textContent = `${reaction} ${username}`;
+                reactionsContainer.appendChild(reactionEl);
+            }
+        });
+
+        socket.on('chat message', (msg, serverOffset, msgUsername, messageId, replyToId) => {
             if (messages.querySelector(`[data-message-id="${messageId}"]`)) {
                 return; // Evitar duplicados
             }
 
             const isOwnMessage = username === msgUsername
             const convertedMsg = convertEmojis(msg)
-            const item = `
-                <li class="message ${isOwnMessage ? 'own-message' : ''}" data-message-id="${messageId}">
-                    <div class="message-header">
-                        <small class="username">${msgUsername}</small>
-                        <span class="time">${new Date().toLocaleTimeString()}</span>
+            
+            // Crear el elemento del mensaje
+            const messageElement = document.createElement('li')
+            messageElement.className = `message ${isOwnMessage ? 'own-message' : ''}`
+            messageElement.dataset.messageId = messageId
+
+            // Construir el contenido del mensaje
+            messageElement.innerHTML = `
+                <div class="message-header">
+                    <small class="username">${msgUsername}</small>
+                    <span class="time">${new Date().toLocaleTimeString()}</span>
+                    <div class="message-actions">
+                        <button class="reaction-button" onclick="addReaction('${messageId}', '👍')">👍</button>
+                        <button class="reply-button" onclick="replyToMessage('${messageId}')">
+                            <i class="fas fa-reply"></i>
+                        </button>
                         ${isOwnMessage ? '<button class="delete-btn"><i class="fas fa-trash"></i></button>' : ''}
                     </div>
-                    <p class="message-content">${convertedMsg}</p>
-                </li>`
-            messages.insertAdjacentHTML('beforeend', item)
-            socket.auth.serverOffset = serverOffset
-            scrollToBottom()
+                </div>
+                <p class="message-content">${convertedMsg}</p>
+                <div class="reactions"></div>
+            `
 
+            messages.appendChild(messageElement)
+            
             if (isOwnMessage) {
-                const messageElement = messages.lastElementChild
                 const deleteBtn = messageElement.querySelector('.delete-btn')
                 if (deleteBtn) {
                     deleteBtn.addEventListener('click', () => {
@@ -85,7 +170,24 @@
                     })
                 }
             }
+
+            socket.auth.serverOffset = serverOffset
+            scrollToBottom()
         })
+
+        // Hacer las funciones de reacciones disponibles globalmente
+        window.addReaction = function(messageId, reaction) {
+            socket.emit('add reaction', { messageId, reaction })
+        }
+
+        window.replyToMessage = function(messageId) {
+            const originalMessage = document.querySelector(`[data-message-id="${messageId}"]`)
+            const originalContent = originalMessage.querySelector('.message-content').textContent
+            const originalUser = originalMessage.querySelector('.username').textContent
+            
+            input.value = `@${originalUser} `
+            input.focus()
+        }
 
         socket.on('message deleted', (messageId) => {
             const messageElement = messages.querySelector(`[data-message-id="${messageId}"]`)
@@ -431,15 +533,120 @@
                 height: -webkit-fill-available;
             }
         }
+
+        .github-link {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: var(--secondary-color);
+            color: white;
+            text-decoration: none;
+            border-radius: 24px;
+            font-size: 0.9rem;
+            transition: transform 0.2s, background 0.2s;
+        }
+
+        .github-link:hover {
+            transform: translateY(-2px);
+            background: var(--primary-color);
+        }
+
+        .github-link i {
+            font-size: 1.2rem;
+        }
+
+        @media (max-width: 768px) {
+            .github-link {
+                top: auto;
+                bottom: 1rem;
+                right: 1rem;
+                padding: 0.5rem;
+                border-radius: 50%;
+            }
+
+            .github-link span {
+                display: none;
+            }
+        }
+
+        .typing-indicator {
+            position: absolute;
+            bottom: 60px;
+            left: 1rem;
+            color: var(--text-color);
+            opacity: 0.7;
+            font-size: 0.9rem;
+            font-style: italic;
+        }
+
+        .reaction-button,
+        .reply-button {
+            background: none;
+            border: none;
+            padding: 0.25rem;
+            cursor: pointer;
+            opacity: 0;
+            transition: opacity 0.2s;
+            color: var(--text-color);
+        }
+
+        .message:hover .reaction-button,
+        .message:hover .reply-button {
+            opacity: 1;
+        }
+
+        .reactions {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 0.5rem;
+        }
+
+        .reaction {
+            background: var(--bg-color);
+            padding: 0.25rem 0.5rem;
+            border-radius: 1rem;
+            font-size: 0.9rem;
+        }
+
+        .reply-button {
+            background: none;
+            border: none;
+            color: var(--primary-color);
+            cursor: pointer;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .message:hover .reply-button {
+            opacity: 1;
+        }
+
+        .replied-message {
+            border-left: 3px solid var(--primary-color);
+            padding-left: 0.5rem;
+            margin-bottom: 0.5rem;
+            font-size: 0.9rem;
+            opacity: 0.8;
+        }
     </style>
 </head>
 
 <body>
+    <a href="https://github.com/MaicolCorrea" target="_blank" rel="noopener noreferrer" class="github-link">
+        <i class="fab fa-github"></i>
+        <span>MaicolCorrea</span>
+    </a>
     <div class="chat-container">
         <aside class="sidebar">
             <div class="user-info">
                 <h3>Tu usuario</h3>
                 <p id="current-user"></p>
+                <button id="change-username" class="btn-small">Cambiar nombre</button>
             </div>
             <h3>Usuarios en línea</h3>
             <ul id="online-users" class="online-users"></ul>
@@ -449,6 +656,7 @@
             <div class="message-container">
                 <ul id="messages"></ul>
             </div>
+            <div id="typing-indicator" class="typing-indicator"></div>
             <form id="form">
                 <button type="button" id="emoji-button" class="emoji-button">😊</button>
                 <div id="emoji-picker" class="emoji-picker">

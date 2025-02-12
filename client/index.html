@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>WonderChat 2.0</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <link href="https://emoji-css.afeld.me/emoji.css" rel="stylesheet">
 
     <script type="module">
         import { io } from 'https://cdn.socket.io/4.3.2/socket.io.esm.min.js'
@@ -34,6 +35,26 @@
         const input = document.getElementById('input')
         const messages = document.getElementById('messages')
         const onlineUsers = document.getElementById('online-users')
+        const emojiButton = document.getElementById('emoji-button')
+        const emojiPicker = document.getElementById('emoji-picker')
+
+        function scrollToBottom() {
+            const messageContainer = document.querySelector('.message-container')
+            messageContainer.scrollTop = messageContainer.scrollHeight
+        }
+
+        // Función para convertir emojis en el texto
+        function convertEmojis(text) {
+            const emojiMap = {
+                ':)': '😊', ':D': '😃', ':(': '😢', ':P': '😛',
+                '<3': '❤️', ':*': '😘', ':O': '😮', ':|': '😐',
+                ';)': '😉', ':angry:': '😠', ':love:': '😍',
+                ':laugh:': '🤣', ':thumbsup:': '👍', ':clap:': '👏'
+            }
+            
+            return text.replace(/:[)\dDPO|]|<3|:\*|;[)]|:angry:|:love:|:laugh:|:thumbsup:|:clap:/g, 
+                match => emojiMap[match] || match)
+        }
 
         socket.on('chat message', (msg, serverOffset, msgUsername, messageId) => {
             if (messages.querySelector(`[data-message-id="${messageId}"]`)) {
@@ -41,6 +62,7 @@
             }
 
             const isOwnMessage = username === msgUsername
+            const convertedMsg = convertEmojis(msg)
             const item = `
                 <li class="message ${isOwnMessage ? 'own-message' : ''}" data-message-id="${messageId}">
                     <div class="message-header">
@@ -48,11 +70,11 @@
                         <span class="time">${new Date().toLocaleTimeString()}</span>
                         ${isOwnMessage ? '<button class="delete-btn"><i class="fas fa-trash"></i></button>' : ''}
                     </div>
-                    <p class="message-content">${msg}</p>
+                    <p class="message-content">${convertedMsg}</p>
                 </li>`
             messages.insertAdjacentHTML('beforeend', item)
             socket.auth.serverOffset = serverOffset
-            messages.scrollTop = messages.scrollHeight
+            scrollToBottom()
 
             if (isOwnMessage) {
                 const messageElement = messages.lastElementChild
@@ -85,6 +107,20 @@
                 input.value = ''
             }
         })
+
+        // Manejador de emojis
+        function toggleEmojiPicker() {
+            emojiPicker.classList.toggle('show')
+        }
+
+        function insertEmoji(emoji) {
+            const cursorPos = input.selectionStart
+            const textBefore = input.value.substring(0, cursorPos)
+            const textAfter = input.value.substring(cursorPos)
+            input.value = textBefore + emoji + textAfter
+            input.focus()
+            emojiPicker.classList.remove('show')
+        }
     </script>
 
     <style>
@@ -112,16 +148,18 @@
             font-family: system-ui, sans-serif;
             background-color: var(--bg-color);
             color: var(--text-color);
-            height: 100vh;
+            min-height: 100vh;
             display: grid;
             place-items: center;
+            padding: 1rem;
         }
 
         .chat-container {
             display: grid;
             grid-template-columns: 200px 1fr;
-            width: 900px;
-            height: 600px;
+            width: 100%;
+            max-width: 1000px;
+            height: 90vh;
             background: var(--message-bg);
             border-radius: 12px;
             overflow: hidden;
@@ -156,14 +194,14 @@
             display: flex;
             flex-direction: column;
             height: 100%;
+            position: relative;
+            overflow: hidden;
         }
 
         #messages {
             list-style: none;
             margin: 0;
-            padding: 1rem;
-            overflow-y: auto;
-            flex-grow: 1;
+            padding: 0;
             display: flex;
             flex-direction: column;
             gap: 0.5rem;
@@ -226,13 +264,16 @@
         }
 
         #form {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
             display: flex;
             padding: 1rem;
             gap: 0.5rem;
             background: var(--message-bg);
             border-top: 1px solid var(--secondary-color);
-            position: sticky;
-            bottom: 0;
+            z-index: 10;
         }
 
         #input {
@@ -259,15 +300,136 @@
         }
 
         .message-container {
+            flex: 1;
             overflow-y: auto;
-            height: calc(100% - 70px);
-            padding-bottom: 1rem;
+            padding: 1rem;
+            margin-bottom: 70px; /* Espacio para el formulario */
+            scroll-behavior: smooth;
+        }
+
+        .emoji-button {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            padding: 0 0.5rem;
+        }
+
+        .emoji-picker {
+            display: none;
+            position: absolute;
+            bottom: 100%;
+            right: 0;
+            background: var(--message-bg);
+            border: 1px solid var(--secondary-color);
+            border-radius: 8px;
+            padding: 0.5rem;
+            box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+        }
+
+        .emoji-picker.show {
+            display: grid;
+            grid-template-columns: repeat(8, 1fr);
+            gap: 0.5rem;
+        }
+
+        .emoji-item {
+            cursor: pointer;
+            text-align: center;
+            padding: 0.25rem;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+        }
+
+        .emoji-item:hover {
+            background-color: var(--own-message-bg);
         }
 
         /* Ajustar el scroll automático al último mensaje */
         .messages-wrapper {
             display: flex;
             flex-direction: column;
+        }
+
+        /* Estilos para móvil */
+        @media (max-width: 768px) {
+            .chat-container {
+                grid-template-columns: 1fr;
+                height: 100vh;
+                border-radius: 0;
+            }
+
+            .sidebar {
+                display: none; /* O puedes crear un menú hamburguesa */
+            }
+
+            .message {
+                max-width: 90%;
+            }
+
+            #form {
+                padding: 0.5rem;
+            }
+
+            .message-container {
+                padding: 0.5rem;
+                margin-bottom: 60px;
+            }
+
+            body {
+                padding: 0;
+            }
+
+            .emoji-picker {
+                right: 0;
+                left: 0;
+                bottom: 100%;
+                width: auto;
+            }
+
+            .emoji-picker.show {
+                grid-template-columns: repeat(6, 1fr);
+            }
+        }
+
+        /* Ajustes adicionales para una mejor experiencia móvil */
+        @media (max-width: 480px) {
+            .emoji-picker.show {
+                grid-template-columns: repeat(4, 1fr);
+            }
+
+            #input {
+                font-size: 16px; /* Previene zoom en iOS */
+            }
+
+            .message-header {
+                flex-wrap: wrap;
+            }
+        }
+
+        /* Estilos para el scroll */
+        .message-container::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        .message-container::-webkit-scrollbar-track {
+            background: var(--bg-color);
+        }
+
+        .message-container::-webkit-scrollbar-thumb {
+            background: var(--secondary-color);
+            border-radius: 4px;
+        }
+
+        .message-container::-webkit-scrollbar-thumb:hover {
+            background: var(--primary-color);
+        }
+
+        /* Asegurar que el contenido no se oculte detrás del teclado en móviles */
+        @supports (-webkit-touch-callout: none) {
+            .chat-container {
+                height: -webkit-fill-available;
+            }
         }
     </style>
 </head>
@@ -285,16 +447,58 @@
         
         <main class="chat-main">
             <div class="message-container">
-                <div class="messages-wrapper">
-                    <ul id="messages"></ul>
-                </div>
+                <ul id="messages"></ul>
             </div>
             <form id="form">
+                <button type="button" id="emoji-button" class="emoji-button">😊</button>
+                <div id="emoji-picker" class="emoji-picker">
+                    <div class="emoji-item" onclick="insertEmoji('😊')">😊</div>
+                    <div class="emoji-item" onclick="insertEmoji('😃')">😃</div>
+                    <div class="emoji-item" onclick="insertEmoji('😢')">😢</div>
+                    <div class="emoji-item" onclick="insertEmoji('😛')">😛</div>
+                    <div class="emoji-item" onclick="insertEmoji('❤️')">❤️</div>
+                    <div class="emoji-item" onclick="insertEmoji('😘')">😘</div>
+                    <div class="emoji-item" onclick="insertEmoji('😮')">😮</div>
+                    <div class="emoji-item" onclick="insertEmoji('😐')">😐</div>
+                    <div class="emoji-item" onclick="insertEmoji('😉')">😉</div>
+                    <div class="emoji-item" onclick="insertEmoji('😠')">😠</div>
+                    <div class="emoji-item" onclick="insertEmoji('😍')">😍</div>
+                    <div class="emoji-item" onclick="insertEmoji('🤣')">🤣</div>
+                    <div class="emoji-item" onclick="insertEmoji('👍')">👍</div>
+                    <div class="emoji-item" onclick="insertEmoji('👏')">👏</div>
+                    <div class="emoji-item" onclick="insertEmoji('🎉')">🎉</div>
+                    <div class="emoji-item" onclick="insertEmoji('🌟')">🌟</div>
+                </div>
                 <input type="text" id="input" placeholder="Escribe un mensaje..." autocomplete="off">
                 <button type="submit">Enviar</button>
             </form>
         </main>
     </div>
+
+    <script>
+        // Agregar los event listeners fuera del módulo
+        document.getElementById('emoji-button').addEventListener('click', () => {
+            document.getElementById('emoji-picker').classList.toggle('show')
+        })
+
+        // Cerrar el picker cuando se hace clic fuera de él
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('#emoji-picker') && !e.target.closest('#emoji-button')) {
+                document.getElementById('emoji-picker').classList.remove('show')
+            }
+        })
+
+        // Función global para insertar emojis
+        window.insertEmoji = function(emoji) {
+            const input = document.getElementById('input')
+            const cursorPos = input.selectionStart
+            const textBefore = input.value.substring(0, cursorPos)
+            const textAfter = input.value.substring(cursorPos)
+            input.value = textBefore + emoji + textAfter
+            input.focus()
+            document.getElementById('emoji-picker').classList.remove('show')
+        }
+    </script>
 </body>
 
 </html>
